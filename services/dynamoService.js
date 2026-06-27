@@ -16,6 +16,7 @@ const s3 = new S3Client({ region: 'us-east-1' })
 const BUCKET_NAME = 'notas-app-adjuntos'
 const TABLE_NAME = 'notas'
 
+/* ------------------------------------------------------------------------- */
 const obtenerNotasPorUsuario = async (userId) => {
   const params = {
     TableName: TABLE_NAME,
@@ -44,6 +45,7 @@ const obtenerNotasPorUsuario = async (userId) => {
   return notas
 }
 
+/* ------------------------------------------------------------------------- */
 const crearNota = async (nota) => {
   const params = {
     TableName: TABLE_NAME,
@@ -53,6 +55,7 @@ const crearNota = async (nota) => {
   return nota
 }
 
+/* ------------------------------------------------------------------------- */
 const actualizarNota = async (userId, noteId, titulo, cuerpo, adjuntoKey) => {
   const params = {
     TableName: TABLE_NAME,
@@ -72,6 +75,7 @@ const actualizarNota = async (userId, noteId, titulo, cuerpo, adjuntoKey) => {
   return result.Attributes
 }
 
+/* ------------------------------------------------------------------------- */
 const desactivarNota = async (userId, noteId) => {
   const params = {
     TableName: TABLE_NAME,
@@ -93,6 +97,7 @@ const desactivarNota = async (userId, noteId) => {
   return result.Attributes
 }
 
+/* ------------------------------------------------------------------------- */
 module.exports = {
   obtenerNotasPorUsuario,
   crearNota,
