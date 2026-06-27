@@ -6,6 +6,7 @@ const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs')
 const sqs = new SQSClient({ region: 'us-east-1' })
 const QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/152146163155/notas-emails'
 
+/* --------------------esta es la unica funcion que usa el ./models/ nota.js por ahora---------------------- */
 exports.handler = async (event) => {
   try {
     const userId = event.requestContext.authorizer.jwt.claims.sub
