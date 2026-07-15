@@ -1,18 +1,9 @@
-const response = (statusCode, body, event = null) => {
-  let origin = "*";
-  if (event && event.headers) {
-    origin = event.headers.origin || event.headers.Origin || "*";
-  }
-
+const response = (statusCode, body) => {
   return {
     statusCode: statusCode,
     headers: {
-      "Content-Type": "application/json",
-      // Usamos comillas dobles estrictas para evitar errores de parseo en la infraestructura
-      "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Amz-Date, X-Api-Key, X-Amz-Security-Token",
-      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Credentials": "true"
+      "Content-Type": "application/json"
+      // Quitamos Access-Control-Allow-Origin y los demás porque ya están configurados en la interfaz de API Gateway
     },
     body: JSON.stringify(body)
   };
