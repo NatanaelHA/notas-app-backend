@@ -61,13 +61,14 @@ const actualizarNota = async (userId, noteId, titulo, cuerpo, adjuntoKey) => {
     TableName: TABLE_NAME,
     Key: { userId, noteId },
     UpdateExpression:
-      'set titulo = :titulo, cuerpo = :cuerpo, adjuntoKey = :adjuntoKey',
+      'set titulo = :titulo, cuerpo = :cuerpo, adjuntoKey = :adjuntoKey, actualizadoEn = :actualizadoEn',
     ConditionExpression: 'attribute_exists(noteId) AND activo = :activo',
     ExpressionAttributeValues: {
       ':titulo': titulo,
       ':cuerpo': cuerpo,
       ':adjuntoKey': adjuntoKey || null,
       ':activo': true,
+      ':actualizadoEn': new Date().toISOString(),
     },
     ReturnValues: 'ALL_NEW',
   }
