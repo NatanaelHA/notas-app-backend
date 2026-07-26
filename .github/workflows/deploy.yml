@@ -41,3 +41,5 @@ jobs:
           aws lambda update-function-code --function-name desactivarNota --zip-file fileb://lambda.zip
           aws lambda update-function-code --function-name obtenerUrlSubida --zip-file fileb://lambda.zip
           aws lambda update-function-code --function-name mailer --zip-file fileb://lambda.zip
+          aws lambda update-function-code --function-name crearInvitado --zip-file fileb://lambda.zip
+          aws lambda update-function-code --function-name limpiarInvitados --zip-file fileb://lambda.zip

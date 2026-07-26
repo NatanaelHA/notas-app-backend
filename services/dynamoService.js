@@ -6,6 +6,7 @@ const {
   QueryCommand,
   PutCommand,
   UpdateCommand,
+  DeleteCommand,
 } = require('@aws-sdk/lib-dynamodb')
 
 const client = new DynamoDBClient({ region: 'us-east-1' })
@@ -99,9 +100,34 @@ const desactivarNota = async (userId, noteId) => {
 }
 
 /* ------------------------------------------------------------------------- */
+// Elimina PERMANENTEMENTE todas las notas de un usuario (usado al borrar invitados)
+const eliminarNotasPorUsuario = async (userId) => {
+  const params = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :userId',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+    },
+  }
+  const result = await dynamo.send(new QueryCommand(params))
+
+  await Promise.all(
+    result.Items.map((nota) =>
+      dynamo.send(new DeleteCommand({
+        TableName: TABLE_NAME,
+        Key: { userId: nota.userId, noteId: nota.noteId },
+      }))
+    )
+  )
+
+  return result.Items.length
+}
+
+/* ------------------------------------------------------------------------- */
 module.exports = {
   obtenerNotasPorUsuario,
   crearNota,
   actualizarNota,
   desactivarNota,
+  eliminarNotasPorUsuario,
 }
