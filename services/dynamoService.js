@@ -124,10 +124,28 @@ const eliminarNotasPorUsuario = async (userId) => {
 }
 
 /* ------------------------------------------------------------------------- */
+// Cuenta cuántas notas activas tiene un usuario (para limitar el máximo permitido)
+const contarNotasActivas = async (userId) => {
+  const params = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :userId',
+    FilterExpression: 'activo = :activo',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+      ':activo': true,
+    },
+    Select: 'COUNT',
+  }
+  const result = await dynamo.send(new QueryCommand(params))
+  return result.Count
+}
+
+/* ------------------------------------------------------------------------- */
 module.exports = {
   obtenerNotasPorUsuario,
   crearNota,
   actualizarNota,
   desactivarNota,
   eliminarNotasPorUsuario,
+  contarNotasActivas,
 }
