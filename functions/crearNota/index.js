@@ -5,7 +5,7 @@ const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs')
 
 const sqs = new SQSClient({ region: 'us-east-1' })
 const QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/152146163155/notas-emails'
-const MAX_NOTAS_POR_USUARIO = 20
+const MAX_NOTAS_POR_USUARIO = 2
 
 exports.handler = async (event) => {
   try {
