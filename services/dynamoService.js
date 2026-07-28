@@ -6,6 +6,7 @@ const {
   QueryCommand,
   PutCommand,
   UpdateCommand,
+  DeleteCommand,
 } = require('@aws-sdk/lib-dynamodb')
 
 const client = new DynamoDBClient({ region: 'us-east-1' })
@@ -16,6 +17,7 @@ const s3 = new S3Client({ region: 'us-east-1' })
 const BUCKET_NAME = 'notas-app-adjuntos'
 const TABLE_NAME = 'notas'
 
+/* ------------------------------------------------------------------------- */
 const obtenerNotasPorUsuario = async (userId) => {
   const params = {
     TableName: TABLE_NAME,
@@ -44,6 +46,7 @@ const obtenerNotasPorUsuario = async (userId) => {
   return notas
 }
 
+/* ------------------------------------------------------------------------- */
 const crearNota = async (nota) => {
   const params = {
     TableName: TABLE_NAME,
@@ -53,18 +56,20 @@ const crearNota = async (nota) => {
   return nota
 }
 
+/* ------------------------------------------------------------------------- */
 const actualizarNota = async (userId, noteId, titulo, cuerpo, adjuntoKey) => {
   const params = {
     TableName: TABLE_NAME,
     Key: { userId, noteId },
     UpdateExpression:
-      'set titulo = :titulo, cuerpo = :cuerpo, adjuntoKey = :adjuntoKey',
+      'set titulo = :titulo, cuerpo = :cuerpo, adjuntoKey = :adjuntoKey, actualizadoEn = :actualizadoEn',
     ConditionExpression: 'attribute_exists(noteId) AND activo = :activo',
     ExpressionAttributeValues: {
       ':titulo': titulo,
       ':cuerpo': cuerpo,
       ':adjuntoKey': adjuntoKey || null,
       ':activo': true,
+      ':actualizadoEn': new Date().toISOString(),
     },
     ReturnValues: 'ALL_NEW',
   }
@@ -72,6 +77,7 @@ const actualizarNota = async (userId, noteId, titulo, cuerpo, adjuntoKey) => {
   return result.Attributes
 }
 
+/* ------------------------------------------------------------------------- */
 const desactivarNota = async (userId, noteId) => {
   const params = {
     TableName: TABLE_NAME,
@@ -93,9 +99,53 @@ const desactivarNota = async (userId, noteId) => {
   return result.Attributes
 }
 
+/* ------------------------------------------------------------------------- */
+// Elimina PERMANENTEMENTE todas las notas de un usuario (usado al borrar invitados)
+const eliminarNotasPorUsuario = async (userId) => {
+  const params = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :userId',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+    },
+  }
+  const result = await dynamo.send(new QueryCommand(params))
+
+  await Promise.all(
+    result.Items.map((nota) =>
+      dynamo.send(new DeleteCommand({
+        TableName: TABLE_NAME,
+        Key: { userId: nota.userId, noteId: nota.noteId },
+      }))
+    )
+  )
+
+  return result.Items.length
+}
+
+/* ------------------------------------------------------------------------- */
+// Cuenta cuántas notas activas tiene un usuario (para limitar el máximo permitido)
+const contarNotasActivas = async (userId) => {
+  const params = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :userId',
+    FilterExpression: 'activo = :activo',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+      ':activo': true,
+    },
+    Select: 'COUNT',
+  }
+  const result = await dynamo.send(new QueryCommand(params))
+  return result.Count
+}
+
+/* ------------------------------------------------------------------------- */
 module.exports = {
   obtenerNotasPorUsuario,
   crearNota,
   actualizarNota,
   desactivarNota,
+  eliminarNotasPorUsuario,
+  contarNotasActivas,
 }
