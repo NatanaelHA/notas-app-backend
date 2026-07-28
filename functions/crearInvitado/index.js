@@ -44,7 +44,7 @@ exports.handler = async () => {
     const email = `invitado-${sufijo}@invitado.notasapp.local`
     const password = generarPassword()
 
-    const resultadoCreacion = await cognito.send(new AdminCreateUserCommand({
+    await cognito.send(new AdminCreateUserCommand({
       UserPoolId: USER_POOL_ID,
       Username: email,
       UserAttributes: [
@@ -62,11 +62,7 @@ exports.handler = async () => {
       Permanent: true,
     }))
 
-    return response(201, {
-      email,
-      password,
-      creadoEn: resultadoCreacion.User.UserCreateDate,
-    })
+    return response(201, { email, password })
   } catch (error) {
     console.error('Error al crear invitado:', error)
     return response(500, { mensaje: 'Error al crear cuenta de invitado' })
