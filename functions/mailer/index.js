@@ -4,7 +4,12 @@ const ses = new SESClient({ region: 'us-east-1' })
 
 exports.handler = async (event) => {
   for (const record of event.Records) {
-    const { email, titulo, noteId } = JSON.parse(record.body)
+    const { email, titulo, noteId, esInvitado } = JSON.parse(record.body)
+
+    if (esInvitado) {
+      console.log(`[SIMULADO] Email NO enviado a invitado (${email}) para nota ${noteId} — "${titulo}"`)
+      continue
+    }
 
     await ses.send(new SendEmailCommand({
       Source: 'natanaelhuenullan6@gmail.com',
