@@ -13,6 +13,8 @@ exports.handler = async (event) => {
 
     console.log(`Notas eliminadas para invitado ${detalle.userId}: ${cantidadEliminadas}`)
   } catch (error) {
-    console.error('Error al eliminar notas de invitado:', error)
+    const userId = event?.detail?.userId || 'desconocido'
+    console.error(`Error al eliminar notas del invitado ${userId}:`, error)
+    throw error
   }
 }
