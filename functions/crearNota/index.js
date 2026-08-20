@@ -20,13 +20,16 @@ exports.handler = async (event) => {
     const nota = crearModeloNota(userId, titulo, cuerpo)
     await crearNota(nota)
 
+    const esInvitado = event.requestContext.authorizer.jwt.claims['custom:esInvitado'] === 'true'
+
     await sqs.send(new SendMessageCommand({
       QueueUrl: QUEUE_URL,
       MessageBody: JSON.stringify({
         userId,
         email: event.requestContext.authorizer.jwt.claims.email,
         titulo: nota.titulo,
-        noteId: nota.noteId
+        noteId: nota.noteId,
+        esInvitado
       })
     }))
 
