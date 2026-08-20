@@ -227,3 +227,5 @@ Cada usuario puede mantener hasta 20 notas activas. Las notas desactivadas no cu
 El servicio publica mensajes en SQS y no espera a que SES envíe el correo. Esto desacopla la creación de notas del servicio de notificaciones.
 
 ### Limpieza desacoplada de invitados
+
+El servicio de usuarios no accede directamente a la tabla `notas`. Publica `InvitadoEliminado` y este backend elimina los datos que le pertenecen.
