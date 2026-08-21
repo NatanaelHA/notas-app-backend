@@ -67,6 +67,10 @@ DynamoDB
 
 La operación es idempotente: si el mismo evento se procesa nuevamente y las notas ya no existen, no se produce daño. Si DynamoDB falla, la Lambda vuelve a lanzar el error para permitir reintentos y registra el `userId` afectado en CloudWatch.
 
+La regla de EventBridge `invitadoEliminadoARegistroNotas` tiene configurada la cola SQS `eventos-invitados-fallidos` como DLQ. Si `eliminarNotasInvitado` falla repetidamente y EventBridge agota sus reintentos, el evento original se deposita en esa cola en vez de descartarse silenciosamente. El mensaje conserva el `userId` afectado, que también queda registrado en CloudWatch por la Lambda.
+
+La DLQ se configura en AWS como parte del destino de EventBridge; por eso no aparece como una cola enviada directamente desde el código de este backend.
+
 ## Servicios AWS utilizados
 
 | Servicio | Uso dentro de este backend |
