@@ -47,6 +47,29 @@ const obtenerNotasPorUsuario = async (userId) => {
 }
 
 /* ------------------------------------------------------------------------- */
+// Obtiene solamente las notas activas que se incluirán en el resumen.
+const obtenerNotasParaResumen = async (userId) => {
+  const params = {
+    TableName: TABLE_NAME,
+    KeyConditionExpression: 'userId = :userId',
+    FilterExpression: 'activo = :activo',
+    ExpressionAttributeValues: {
+      ':userId': userId,
+      ':activo': true,
+    },
+  }
+  const result = await dynamo.send(new QueryCommand(params))
+
+  return (result.Items || []).map((nota) => ({
+    noteId: nota.noteId,
+    titulo: nota.titulo,
+    cuerpo: nota.cuerpo,
+    creadoEn: nota.creadoEn,
+    actualizadoEn: nota.actualizadoEn,
+  }))
+}
+
+/* ------------------------------------------------------------------------- */
 const crearNota = async (nota) => {
   const params = {
     TableName: TABLE_NAME,
@@ -143,6 +166,7 @@ const contarNotasActivas = async (userId) => {
 /* ------------------------------------------------------------------------- */
 module.exports = {
   obtenerNotasPorUsuario,
+  obtenerNotasParaResumen,
   crearNota,
   actualizarNota,
   desactivarNota,
