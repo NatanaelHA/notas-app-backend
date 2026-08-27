@@ -18,8 +18,8 @@ Este servicio es responsable de:
 - Actualizar y desactivar notas.
 - Aplicar un TTL de 7 días a las notas desactivadas.
 - Generar URLs prefirmadas para subir y descargar adjuntos de S3.
-- Publicar en SQS una solicitud de notificación cuando se crea una nota.
-- Consumir el evento `InvitadoEliminado` y borrar permanentemente las notas del invitado.
+- Consumir el evento `InvitadoEliminado` y obtener las notas activas del invitado.
+- Publicar en SQS un resumen de esas notas antes de borrarlas permanentemente.
 
 Este servicio **no** administra usuarios en Cognito ni envía correos directamente mediante SES. Esas responsabilidades pertenecen a los servicios de usuarios y notificaciones.
 
@@ -39,31 +39,25 @@ DynamoDB / S3
 
 Aunque Cognito protege los endpoints mediante API Gateway, el User Pool es administrado por `notas-app-usuarios`. Este servicio solo consume los claims JWT, como `sub`, `email` y `custom:esInvitado`.
 
-### Notificación al crear una nota
-
-```text
-crearNota
-    ↓
-SQS (notas-emails)
-    ↓
-mailer, en notas-app-notifications
-    ↓
-SES
-```
-
-`crearNota` guarda la nota y publica un mensaje en SQS. El envío del correo ocurre de forma asíncrona en el servicio de notificaciones.
-
-### Eliminación de notas de invitados
+### Resumen y eliminación de notas de invitados
 
 ```text
 notas-app-usuarios
     ↓ publica InvitadoEliminado
-EventBridge
+EventBridge (regla invitadoEliminadoARegistroNotas)
     ↓
 eliminarNotasInvitado
-    ↓
-DynamoDB
+    ↓ consulta notas activas en DynamoDB
+    ├─ si existen, publica resumen_invitado en SQS (notas-emails)
+    │      ↓
+    │  mailer, en notas-app-notifications
+    │      ↓
+    │  SES envía el resumen al correo de auditoría
+    │
+    └─ después borra todas las notas del invitado en DynamoDB
 ```
+
+`eliminarNotasInvitado` publica el resumen antes de borrar las notas. El mensaje contiene la información necesaria para que el servicio de notificaciones prepare el correo sin consultar DynamoDB. No incluye archivos adjuntos ni URLs prefirmadas de S3.
 
 La operación es idempotente: si el mismo evento se procesa nuevamente y las notas ya no existen, no se produce daño. Si DynamoDB falla, la Lambda vuelve a lanzar el error para permitir reintentos y registra el `userId` afectado en CloudWatch.
 
@@ -79,7 +73,7 @@ La DLQ se configura en AWS como parte del destino de EventBridge; por eso no apa
 | API Gateway | Expone los endpoints HTTP y valida los JWT de Cognito. |
 | Amazon DynamoDB | Almacena las notas en la tabla `notas`. |
 | Amazon S3 | Almacena adjuntos en el bucket `notas-app-adjuntos`. |
-| Amazon SQS | Recibe solicitudes de correo publicadas por `crearNota`. |
+| Amazon SQS | Recibe los resúmenes de invitados publicados por `eliminarNotasInvitado`. |
 | Amazon EventBridge | Entrega el evento `InvitadoEliminado` a su Lambda consumidora. |
 | Amazon CloudWatch | Registra logs y métricas de las funciones. |
 
@@ -88,11 +82,11 @@ La DLQ se configura en AWS como parte del destino de EventBridge; por eso no apa
 | Función | Activación | Descripción |
 |---|---|---|
 | `obtenerNotas` | API Gateway | Obtiene las notas activas del usuario y genera URLs temporales para sus adjuntos. |
-| `crearNota` | API Gateway | Crea una nota, aplica el límite de 20 notas activas y publica una solicitud de correo en SQS. |
+| `crearNota` | API Gateway | Crea una nota y aplica el límite de 20 notas activas. |
 | `actualizarNota` | API Gateway | Actualiza título, cuerpo y referencia del adjunto de una nota activa. |
 | `desactivarNota` | API Gateway | Realiza un soft delete y configura un TTL de 7 días. |
 | `obtenerUrlSubida` | API Gateway | Genera una URL prefirmada de S3 válida durante 5 minutos. |
-| `eliminarNotasInvitado` | EventBridge | Elimina permanentemente todas las notas asociadas al `userId` de un invitado eliminado. |
+| `eliminarNotasInvitado` | EventBridge | Obtiene las notas activas, publica su resumen en SQS y elimina permanentemente todas las notas del invitado. |
 
 ## Endpoints
 
@@ -110,19 +104,27 @@ Los endpoints protegidos obtienen la identidad desde `event.requestContext.autho
 
 ## Contratos de integración
 
-### Mensaje enviado a SQS
+### Mensaje `resumen_invitado` enviado a SQS
 
-Cuando se crea una nota, `crearNota` publica un mensaje con esta estructura:
+Antes de borrar las notas, `eliminarNotasInvitado` publica un mensaje con esta estructura:
 
 ```json
 {
-  "userId": "sub-del-usuario",
-  "email": "usuario@ejemplo.com",
-  "titulo": "Título de la nota",
-  "noteId": "id-de-la-nota",
-  "esInvitado": false
+  "tipo": "resumen_invitado",
+  "userId": "sub-del-invitado",
+  "email": "correo-de-auditoria-verificado-en-ses@ejemplo.com",
+  "notas": [
+    {
+      "noteId": "id-de-la-nota",
+      "titulo": "Título de la nota",
+      "cuerpo": "Contenido",
+      "creadoEn": "2026-08-25T02:14:32.687Z"
+    }
+  ]
 }
 ```
+
+Solo se incluyen notas activas en el resumen. Después de que SQS acepta el mensaje, la Lambda elimina todas las notas asociadas al invitado.
 
 ### Evento `InvitadoEliminado`
 
@@ -175,7 +177,8 @@ notas-app/
 ├── models/
 │   └── nota.js
 ├── services/
-│   └── dynamoService.js
+│   ├── dynamoService.js
+│   └── sqsService.js
 ├── utils/
 │   └── response.js
 ├── .github/
@@ -228,7 +231,7 @@ Cada usuario puede mantener hasta 20 notas activas. Las notas desactivadas no cu
 
 ### Notificaciones asíncronas
 
-El servicio publica mensajes en SQS y no espera a que SES envíe el correo. Esto desacopla la creación de notas del servicio de notificaciones.
+El servicio publica el resumen del invitado en SQS y no espera a que SES envíe el correo. Esto desacopla la limpieza de notas del envío realizado por el servicio de notificaciones.
 
 ### Limpieza desacoplada de invitados
 
