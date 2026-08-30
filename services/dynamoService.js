@@ -123,7 +123,7 @@ const desactivarNota = async (userId, noteId) => {
 }
 
 /* ------------------------------------------------------------------------- */
-// Elimina PERMANENTEMENTE todas las notas de un usuario (usado al borrar invitados)
+// Elimina PERMANENTEMENTE todas las notas de un usuario, ya sea invitado o real
 const eliminarNotasPorUsuario = async (userId) => {
   const params = {
     TableName: TABLE_NAME,
