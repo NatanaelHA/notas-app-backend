@@ -1,6 +1,6 @@
 # Notas App — Servicio de notas
 
-Backend serverless responsable del dominio de notas de **Notas App**. Expone las operaciones de creación, consulta, actualización y desactivación de notas, administra sus adjuntos y reacciona a la eliminación de usuarios invitados.
+Backend serverless responsable del dominio de notas de **Notas App**. Expone las operaciones de creación, consulta, actualización y desactivación de notas, administra sus adjuntos y procesa la limpieza de notas de invitados y usuarios reales.
 
 Este repositorio forma parte de una arquitectura separada por servicios:
 
@@ -18,8 +18,9 @@ Este servicio es responsable de:
 - Actualizar y desactivar notas.
 - Aplicar un TTL de 7 días a las notas desactivadas.
 - Generar URLs prefirmadas para subir y descargar adjuntos de S3.
-- Consumir el evento `InvitadoEliminado` y obtener las notas activas del invitado.
-- Publicar en SQS un resumen de esas notas antes de borrarlas permanentemente.
+- Consumir los eventos `InvitadoEliminado` y `UsuarioParaLimpieza`.
+- Obtener las notas activas que se incluirán en cada resumen.
+- Publicar en SQS un resumen antes de borrar permanentemente todas las notas del usuario correspondiente.
 
 Este servicio **no** administra usuarios en Cognito ni envía correos directamente mediante SES. Esas responsabilidades pertenecen a los servicios de usuarios y notificaciones.
 
@@ -59,11 +60,37 @@ eliminarNotasInvitado
 
 `eliminarNotasInvitado` publica el resumen antes de borrar las notas. El mensaje contiene la información necesaria para que el servicio de notificaciones prepare el correo sin consultar DynamoDB. No incluye archivos adjuntos ni URLs prefirmadas de S3.
 
-La operación es idempotente: si el mismo evento se procesa nuevamente y las notas ya no existen, no se produce daño. Si DynamoDB falla, la Lambda vuelve a lanzar el error para permitir reintentos y registra el `userId` afectado en CloudWatch.
+La operación es idempotente: si el mismo evento se procesa nuevamente y las notas ya no existen, no se produce daño. Si DynamoDB falla, la Lambda vuelve a lanzar el error y registra el `userId` afectado en CloudWatch.
 
-La regla de EventBridge `invitadoEliminadoARegistroNotas` tiene configurada la cola SQS `eventos-invitados-fallidos` como DLQ. Si `eliminarNotasInvitado` falla repetidamente y EventBridge agota sus reintentos, el evento original se deposita en esa cola en vez de descartarse silenciosamente. El mensaje conserva el `userId` afectado, que también queda registrado en CloudWatch por la Lambda.
+La regla de EventBridge `invitadoEliminadoARegistroNotas` tiene configurada la cola SQS `eventos-invitados-fallidos` como DLQ. Esta DLQ protege la entrega entre EventBridge y el destino: si EventBridge no logra entregar el evento a la Lambda después de agotar su política de reintentos, conserva allí el evento original.
+
+Los errores que ocurren después de que Lambda acepta la invocación pertenecen al mecanismo asíncrono de Lambda. Sin una configuración personalizada, Lambda reintenta por defecto dos veces los errores de ejecución. La DLQ de la regla no sustituye un destino de fallos propio de la Lambda.
 
 La DLQ se configura en AWS como parte del destino de EventBridge; por eso no aparece como una cola enviada directamente desde el código de este backend.
+
+### Resumen y eliminación semanal de notas de usuarios reales
+
+```text
+notas-app-usuarios
+    ↓ publica UsuarioParaLimpieza con userId
+EventBridge (regla usuarioParaLimpiezaARegistroNotas)
+    ↓
+eliminarNotasUsuario
+    ↓ consulta notas activas en DynamoDB
+    ├─ si existen, publica resumen_usuario en SQS (notas-emails)
+    │      ↓
+    │  mailer, en notas-app-notifications
+    │      ↓
+    │  SES envía el resumen al correo de auditoría
+    │
+    └─ después borra todas las notas del usuario en DynamoDB
+```
+
+La limpieza se inicia cada domingo a las 03:00, zona horaria `America/Santiago`, desde el Scheduler `limpiarUsuariosSemanal` del servicio de usuarios. A diferencia del flujo de invitados, la cuenta real permanece en Cognito; solamente se eliminan sus notas.
+
+El correo real del usuario no forma parte del evento ni del mensaje de SQS. `eliminarNotasUsuario` usa el correo de auditoría verificado en SES, lo que permite mantener este flujo dentro de las restricciones actuales del sandbox. El usuario puede conservar sus notas descargándolas en PDF desde el frontend antes de la limpieza semanal.
+
+La regla `usuarioParaLimpiezaARegistroNotas` también utiliza `eventos-invitados-fallidos` como DLQ de entrega. El nombre histórico de la cola se conserva y la cola es compartida por las dos reglas.
 
 ## Servicios AWS utilizados
 
@@ -73,8 +100,8 @@ La DLQ se configura en AWS como parte del destino de EventBridge; por eso no apa
 | API Gateway | Expone los endpoints HTTP y valida los JWT de Cognito. |
 | Amazon DynamoDB | Almacena las notas en la tabla `notas`. |
 | Amazon S3 | Almacena adjuntos en el bucket `notas-app-adjuntos`. |
-| Amazon SQS | Recibe los resúmenes de invitados publicados por `eliminarNotasInvitado`. |
-| Amazon EventBridge | Entrega el evento `InvitadoEliminado` a su Lambda consumidora. |
+| Amazon SQS | Recibe los resúmenes de invitados y usuarios reales antes de la eliminación de sus notas. |
+| Amazon EventBridge | Entrega `InvitadoEliminado` y `UsuarioParaLimpieza` a sus Lambdas consumidoras. |
 | Amazon CloudWatch | Registra logs y métricas de las funciones. |
 
 ## Lambdas
@@ -87,6 +114,7 @@ La DLQ se configura en AWS como parte del destino de EventBridge; por eso no apa
 | `desactivarNota` | API Gateway | Realiza un soft delete y configura un TTL de 7 días. |
 | `obtenerUrlSubida` | API Gateway | Genera una URL prefirmada de S3 válida durante 5 minutos. |
 | `eliminarNotasInvitado` | EventBridge | Obtiene las notas activas, publica su resumen en SQS y elimina permanentemente todas las notas del invitado. |
+| `eliminarNotasUsuario` | EventBridge | Obtiene las notas activas, publica el resumen semanal y elimina permanentemente todas las notas del usuario real sin borrar su cuenta. |
 
 ## Endpoints
 
@@ -140,6 +168,40 @@ Solo se incluyen notas activas en el resumen. Después de que SQS acepta el mens
 }
 ```
 
+### Mensaje `resumen_usuario` enviado a SQS
+
+`eliminarNotasUsuario` publica el resumen semanal con esta estructura:
+
+```json
+{
+  "tipo": "resumen_usuario",
+  "userId": "sub-del-usuario",
+  "email": "correo-de-auditoria-verificado-en-ses@ejemplo.com",
+  "notas": [
+    {
+      "noteId": "id-de-la-nota",
+      "titulo": "Título de la nota",
+      "cuerpo": "Contenido",
+      "creadoEn": "2026-08-25T02:14:32.687Z"
+    }
+  ]
+}
+```
+
+### Evento `UsuarioParaLimpieza`
+
+`eliminarNotasUsuario` recibe desde EventBridge:
+
+```json
+{
+  "detail": {
+    "tipo": "UsuarioParaLimpieza",
+    "userId": "sub-del-usuario",
+    "programadoEn": "2026-08-30T07:00:40.000Z"
+  }
+}
+```
+
 ## Modelo de nota
 
 Una nota nueva contiene inicialmente:
@@ -170,17 +232,15 @@ notas-app/
 │   │   └── index.js
 │   ├── eliminarNotasInvitado/
 │   │   └── index.js
+│   ├── eliminarNotasUsuario/
+│   │   └── index.js
 │   ├── obtenerNotas/
 │   │   └── index.js
 │   └── obtenerUrlSubida/
 │       └── index.js
-├── models/
-│   └── nota.js
 ├── services/
 │   ├── dynamoService.js
 │   └── sqsService.js
-├── utils/
-│   └── response.js
 ├── .github/
 │   └── workflows/
 │       └── deploy.yml
@@ -208,7 +268,7 @@ El workflow `.github/workflows/deploy.yml` se ejecuta con cada push a:
 - `develop`, usando el environment de GitHub `development`.
 - `main`, usando el environment de GitHub `production`.
 
-El workflow instala dependencias, genera `lambda.zip` y actualiza el código de las seis Lambdas existentes mediante AWS CLI.
+El workflow instala dependencias, genera `lambda.zip` y actualiza el código de las siete Lambdas existentes mediante AWS CLI.
 
 Secrets requeridos por el workflow:
 
@@ -231,8 +291,12 @@ Cada usuario puede mantener hasta 20 notas activas. Las notas desactivadas no cu
 
 ### Notificaciones asíncronas
 
-El servicio publica el resumen del invitado en SQS y no espera a que SES envíe el correo. Esto desacopla la limpieza de notas del envío realizado por el servicio de notificaciones.
+El servicio publica los resúmenes en SQS y no espera a que SES envíe el correo. Esto desacopla la limpieza de notas del envío realizado por el servicio de notificaciones.
 
 ### Limpieza desacoplada de invitados
 
 El servicio de usuarios no accede directamente a la tabla `notas`. Publica `InvitadoEliminado` y este backend elimina los datos que le pertenecen.
+
+### Limpieza desacoplada de usuarios reales
+
+El servicio de usuarios publica `UsuarioParaLimpieza` solamente con el `userId`. Este backend prepara el resumen para el correo de auditoría y elimina las notas, mientras la cuenta real permanece en Cognito.
