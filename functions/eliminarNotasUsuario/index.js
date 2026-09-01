@@ -4,11 +4,13 @@ const {
 } = require('../../services/dynamoService')
 const { publicarMensajeCorreo } = require('../../services/sqsService')
 
+const EMAIL_AUDITORIA = 'natanaelhuenullan6@gmail.com'
+
 exports.handler = async (event) => {
   try {
     const detalle = event.detail
 
-    if (!detalle?.userId || !detalle?.email) {
+    if (!detalle?.userId) {
       throw new Error(
         `Evento UsuarioParaLimpieza incompleto: ${JSON.stringify(event)}`,
       )
@@ -24,7 +26,7 @@ exports.handler = async (event) => {
       await publicarMensajeCorreo({
         tipo: 'resumen_usuario',
         userId: detalle.userId,
-        email: detalle.email,
+        email: EMAIL_AUDITORIA,
         notas: notasParaResumen,
       })
 
